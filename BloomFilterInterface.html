@@ -1,0 +1,248 @@
+<!-- This bloom filter implementation was created by Evan Amason. -->
+
+<!-- A lot of the inspiration for this page's presentation came from this GitHub repo: https://github.com/llimllib/bloomfilter-tutorial. -->
+
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Bloom Filter</title>
+	<style type="text/css">
+
+		body {
+		    background-color: #778899;
+		    color: black;
+		    font-family: Palatino, Georgia, "Times New Roman", Times, serif;
+		    font-size: 22px;
+		}
+
+		.centerText {
+			text-align: center;
+		}
+
+		.highlightBox {
+	    width: 800px;
+	    margin: auto;
+	    margin-bottom: 25px;
+	    background-color: #87CEFA;
+	    padding: 10px;
+		}
+
+		.inFilterDisplay {
+			visibility: hidden;
+		}
+
+		.displayWord {
+			text-decoration: underline;
+		}
+
+	</style>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.5.2/jquery.min.js"></script>
+
+	<script>
+
+		// Seed is arbitrary and could by anything.
+		seed = 3222022
+
+		// Bit vector implementation inspired by this blog post: https://blog.jakuba.net/2018-01-09-bit-vector-in-javascript/
+
+		// Bit Vector Functions
+
+		// Constructs the bit vector
+		function buildVector(bitCount) {
+			return new Uint32Array(Math.ceil(bitCount / 32));
+		}
+
+		// The choice to make the bit vector have 16000 bits is arbitrary. It could be larger or smaller.
+		vectorSize = 16000
+		bloomVector = buildVector(vectorSize)
+
+		// Set the i-th bit in the vector.
+		function setVector(vector, i) {
+			var bigIndex = Math.floor(i / 32);
+			var smallIndex = i % 32;
+
+			vector[bigIndex] = vector[bigIndex] | (i << smallIndex);
+		}
+
+		// Retrieve whether or not the vector has a 1 in the i-th bit.
+		function getVector(vector, i) {
+			var bigIndex = Math.floor(i / 32);
+			var smallIndex = i % 32;
+
+			var val = vector[bigIndex] & (i << smallIndex);
+
+			return val;
+		}
+
+		// Reset the vector to all zeroes.
+		function resetVector(vector) {
+			var vectorLength = vector.length;
+			for (var i = 0; i < vectorLength; i++) {
+				vector[i] = 0
+			}
+		}
+
+		// TODO: If this filter were being implemented in practice, we'd want to find and use other hash functions with a fast run time and evenly distributed results. However, the below hash functions should work for our purposes.
+
+		// Add together the character value and position for each character in the key. Multiply the result by the string.
+		function charTotalHash(key, seed) {
+			var totalHash = 0;
+			for (var i = 0; i < key.length; i++) {
+				var val = key.charCodeAt(i);
+				totalHash = totalHash + (val + i);
+			}
+
+			return totalHash * seed;
+		}
+
+		// The sum of the value for each character in the key raised to the power of their position in the key multipled by the seed.
+		function charPosHash(key, seed) {
+			var charHash = 0;
+			for (var i = 0; i < key.length; i++) {
+				var val = key.charCodeAt(i);
+				charHash = charHash + (Math.pow(val,i+1) * seed);
+			}
+
+			return charHash;
+		}
+
+		// The sum of the position for each character in the key raised to the power of the value of that character multipled by the seed.
+		function posCharHash(key, seed) {
+			var posHash = 0;
+			for (var i = 0; i < key.length; i++) {
+				var val = key.charCodeAt(i);
+				posHash = posHash + (Math.pow(i+1,val) * seed);
+			}
+
+			return posHash;
+		}
+
+		// The element list is used show elements that have been added to the bit vector. It's a standard array just used for display purposes.
+		elementList = []
+
+		// Store an element in the bloom vector. Updates the words being displayed.
+		function bloom(vector, element) {
+			var charTotalVal = charTotalHash(element,seed) % vectorSize;
+			var charPosVal = charPosHash(element,seed) % vectorSize;
+			var posCharVal = posCharHash(element,seed) % vectorSize;
+			setVector(vector, charTotalVal);
+			setVector(vector, charPosVal);
+			setVector(vector, posCharVal);
+
+			elementList.push(element);
+			$('#storedElements').html(elementList.join(", "));
+
+			$('#elementToAdd').val("");
+		}
+
+		// Check the bloom filter to see if the element is present in it.
+		function checkMembership(vector, element) {
+
+			var charTotalVal = charTotalHash(element,seed) % vectorSize;
+			var charPosVal = charPosHash(element,seed) % vectorSize;
+			var posCharVal = posCharHash(element,seed) % vectorSize;
+
+			var isMember = getVector(vector,charTotalVal) && getVector(vector,charPosVal) && getVector(vector,posCharVal);
+			return isMember;
+		}
+
+		// Functions for interacting with the page's elements.
+		// TODO: For further work on this, we would want to make sure to sanitize our inputs to make sure values that are passed in cannot execute code.
+		$(function() {
+
+			// Add an element to the bloom filter.
+			$('#addElement').click(function() {
+
+				var element = $('#elementToAdd').val();
+
+				if (element.length == 0) {
+					$('#warningDisplay').html("Cannot enter a null value.");
+				}
+
+				else {
+					var isMember = checkMembership(bloomVector, element);
+					if (isMember == 0) {
+						bloom(bloomVector, element);
+						$('#warningDisplay').html("");
+					}
+					else {
+						$('#warningDisplay').html("Value already in Bloom Filter.");
+					}
+				}
+			});
+			
+			// Pressing enter while the Value to Add field has focus does the samething as clicking the "Add Element" button.
+			$('#elementToAdd').keydown(function(event) {
+				if (event.keyCode == '13') {
+					event.preventDefault();
+					$('#addElement').click();
+				}
+			});
+
+			// Clear the filter and display when the "Reset Filter" button is pressed.
+			$('#clearFilter').click(function() {
+				elementList = []
+				$('#storedElements').html("");
+				$('#elementToAdd').val("");
+				$('#elementToCheck').val("");
+				document.getElementById('inFilterDisplay').style.visibility = 'hidden';
+				resetVector(bloomVector);
+			});
+
+			// Handles clicking "Check Element"
+			// TODO: For further work on this, we would want to make sure to sanitize our inputs to make sure values that are passed in cannot execute code.
+			$('#checkElement').click(function() {
+				var element = $('#elementToCheck').val();
+
+				if (element.length != 0) {
+					$('#displayWord').html(element);
+					document.getElementById('inFilterDisplay').style.visibility = 'visible';
+
+					if (checkMembership(bloomVector, element)) {
+						$('#inFilter').html("in");
+					}
+					else {
+						$('#inFilter').html("not in");
+					}
+
+					$('#elementToCheck').val("");
+				}
+			});
+
+			// Pressing enter while the Value to Check field has focus does the samething as clicking the "Check Element" button.
+			$('#elementToCheck').keydown(function(event) {
+				if (event.keyCode == '13') {
+					event.preventDefault();
+					$('#checkElement').click();
+				}
+			});
+
+		});
+
+	</script>
+</head>
+
+<body>
+
+	<h1 class="centerText">Bloom Filter</h1>
+
+	<div id="addElementBox" class="highlightBox">
+		<p>Enter an element below to add it to the Bloom Filter.</p>
+		<p>Value to Add: <input id="elementToAdd">
+			<input type="submit" id="addElement" value="Add Element">
+			<span id="warningDisplay"></span>
+		</p>
+		<p>Elements in filter: [<span id="storedElements"></span>]</p>
+		<p><input type="submit" id="clearFilter" value="Reset Filter"></p>
+	</div>
+
+	<div id="checkMembershipBox" class="highlightBox">
+		<p>Enter an element below to check if it is in the Bloom Filter.</p>
+		<p>Value to Check: <input id="elementToCheck">
+			<input type="submit" id="checkElement" value="Check Element">
+		</p>
+		<p><div id="inFilterDisplay" class="inFilterDisplay"><span id="displayWord" class="displayWord"></span> is <span id="inFilter"></span> the filter.</div></p>
+	</div>
+
+</body>
+</html>
